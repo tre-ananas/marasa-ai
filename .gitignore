@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Local data & secrets (sessions are ephemeral by design; settings may hold a key)
+data/
+.env
+.env.local
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ACTFL material is not redistributable: keep the OPI guide local, not in the repo.
+# See README "Licensing note" before making this repository public.
+OPI-Familiarization-Guide-2020-1.pdf

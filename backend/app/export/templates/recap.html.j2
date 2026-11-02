@@ -1,0 +1,205 @@
+{% set rtl = session.language == 'ar-lev' %}
+<!doctype html>
+<html lang="en" dir="{% if rtl %}rtl{% else %}ltr{% endif %}">
+  <head>
+    <meta charset="utf-8" />
+    <title>Marasa session recap</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 18mm 16mm;
+      }
+      :root {
+        --ink: #1d1d1f;
+        --muted: #6e6e73;
+        --line: #e3e3e8;
+        --accent: #0071e3;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", "Noto Sans", Arial,
+          sans-serif;
+        font-size: 11pt;
+        line-height: 1.5;
+      }
+      header {
+        border-bottom: 2px solid var(--ink);
+        padding-bottom: 10px;
+        margin-bottom: 18px;
+      }
+      h1 {
+        font-size: 20pt;
+        margin: 0 0 4px;
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        font-size: 12pt;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin: 22px 0 8px;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 9.5pt;
+      }
+      .score {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin: 10px 0 4px;
+      }
+      .score .level {
+        font-size: 26pt;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .score .label {
+        color: var(--muted);
+        font-size: 10pt;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 10pt;
+      }
+      th,
+      td {
+        text-align: start;
+        vertical-align: top;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 8.5pt;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .pill {
+        display: inline-block;
+        padding: 1px 7px;
+        border-radius: 999px;
+        font-size: 8pt;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .transcript p {
+        margin: 0 0 7px;
+        font-size: 10pt;
+      }
+      .transcript .who {
+        color: var(--muted);
+        font-weight: 600;
+        margin-inline-end: 6px;
+      }
+      footer {
+        margin-top: 26px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 8.5pt;
+      }
+      .break {
+        break-inside: avoid;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Marasa session recap</h1>
+      <p class="meta">
+        {{ session.created_at }} · {{ session.language_label }} · {{ session.tone_label }} ·
+        {{ session.mode }} mode · {{ session.provider }}/{{ session.model }}
+      </p>
+    </header>
+
+    <div class="score break">
+      <span class="level">{{ level.label }} ({{ level.code }})</span>
+      <span class="label">
+        Estimated ACTFL OPI level · {{ session.level }} at session start
+      </span>
+    </div>
+    <p class="meta">{{ level.summary }}</p>
+
+    {% if topics %}
+      <h2>Topics</h2>
+      <p>{{ topics | join(', ') }}</p>
+    {% endif %}
+
+    <h2>Vocabulary</h2>
+    {% if vocab %}
+      <table>
+        <thead>
+          <tr>
+            <th>Term</th>
+            <th>Meaning</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in vocab %}
+            <tr>
+              <td>{{ item.term }}</td>
+              <td>{{ item.meaning }}</td>
+              <td><span class="pill">{{ item.status }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="meta">No vocabulary observations recorded.</p>
+    {% endif %}
+
+    <h2>Grammar</h2>
+    {% if grammar %}
+      <table>
+        <thead>
+          <tr>
+            <th>Concept</th>
+            <th>Note</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in grammar %}
+            <tr>
+              <td>{{ item.term }}</td>
+              <td>{{ item.note }}</td>
+              <td><span class="pill">{{ item.status }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="meta">No grammar observations recorded.</p>
+    {% endif %}
+
+    {% if next_steps %}
+      <h2>Next steps</h2>
+      <ul>
+        {% for step in next_steps %}
+          <li>{{ step }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <h2>Transcript</h2>
+    <div class="transcript">
+      {% for message in messages %}
+        <p><span class="who">{{ 'Learner' if message.role == 'user' else 'Marasa' }}</span>{{ message.content }}</p>
+      {% endfor %}
+    </div>
+
+    <footer>
+      This score is an estimate produced by an automated practice partner. It is not an official ACTFL
+      Oral Proficiency Interview rating, which can only be issued by ACTFL-certified testers. Marasa
+      aims to imitate the ACTFL Proficiency Guidelines 2012 – Speaking.
+    </footer>
+  </body>
+</html>
