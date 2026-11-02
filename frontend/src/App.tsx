@@ -26,6 +26,7 @@ export default function App() {
   const [active, setActive] = useState<ActiveSession | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
   const [pendingStart, setPendingStart] = useState<StartInput | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -109,6 +110,21 @@ export default function App() {
     setActive(null);
   }, [session]);
 
+  const sessionGone = useCallback(() => {
+    // The session this device was in no longer exists (discarded elsewhere, or
+    // the server restarted). Send the learner back to the start screen with an
+    // explanation instead of silently doing nothing.
+    setSession(null);
+    setActive(null);
+    setNotice(
+      "That session is no longer running — it was discarded, or the server restarted. Start a new one below.",
+    );
+    setError(null);
+    void getActiveSession()
+      .then(setActive)
+      .catch(() => undefined);
+  }, []);
+
   if (!settings) {
     return (
       <main className="flex min-h-full items-center justify-center p-8">
@@ -124,6 +140,7 @@ export default function App() {
           settings={settings}
           busy={busy}
           error={error}
+          notice={notice}
           activeSession={active}
           onStart={start}
           onResume={resume}
@@ -167,8 +184,10 @@ export default function App() {
     <SessionScreen
       session={session}
       settings={settings}
+      error={error}
       onExit={finish}
       onNewSession={() => void startFresh()}
+      onSessionGone={sessionGone}
       onError={setError}
     />
   );

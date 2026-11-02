@@ -69,10 +69,17 @@ Pop-Location
 
 Write-Step "Serving on http://0.0.0.0:$Port"
 Write-Note "One session is shared by every device on the network."
+Write-Note "Access log: $serverLog"
+
+$logDir = Join-Path $root "data\logs"
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$serverLog = Join-Path $logDir "serve.log"
 
 Push-Location (Join-Path $root "backend")
 try {
-    uv run uvicorn app.main:app --host 0.0.0.0 --port $Port
+    # Write the access log to a file so you can see requests from other
+    # devices (tail it with: Get-Content data\logs\serve.log -Wait)
+    uv run uvicorn app.main:app --host 0.0.0.0 --port $Port *> $serverLog
 } finally {
     Pop-Location
 }

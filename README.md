@@ -101,6 +101,8 @@ Notes:
 - **Windows firewall.** The first time, Windows may ask to allow connections through the firewall. If it does not, allow `python.exe` (the backend) on the Private network profile. There are already allow rules for `python.exe` and `node.exe` on this machine.
 - **No authentication.** Anyone on your network can use the app and read the session. That is acceptable on a trusted home Wi-Fi; do not expose the port to the internet. Sessions are ephemeral, so nothing is kept once Marasa stops.
 - **Voice on the LAN** would need HTTPS: you would have to put a reverse proxy with a certificate in front of the app, and a self-signed certificate is awkward to trust on a phone. Not worth it for the MVP.
+- **Plain HTTP is an insecure origin**, so browser APIs that require a secure context are unavailable there: microphone access (voice input) and `crypto.randomUUID()`. Marasa does not use `crypto.randomUUID()` — message ids come from a counter — so everything else works over plain HTTP. See `frontend/src/lib/id.ts`.
+- After an update, refresh the page on each device: the shell is served with `Cache-Control: no-cache` so the browser picks up the new bundle, but a phone that is left open keeps the old one until it reloads.
 
 For development with the same network exposure (Vite dev server instead of the built bundle):
 

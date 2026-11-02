@@ -329,6 +329,7 @@ Practical floor: 8B Q4 ≈ 6 GB RAM/VRAM (CPU-only works, slowly); 14B wants 12 
 | 15 | Local model quality ceiling (dialect naturalness) | High | Documented in README: Arabic practice should use `qwen3.8-max` (Console) or a dialect-tuned local model |
 | 16 | Playwright cannot start under `uvicorn --reload` on Windows | **resolved** | uvicorn switches to a selector event loop when `--reload` is on, and a selector loop cannot spawn subprocesses. The renderer now runs Playwright's sync API in a worker thread and installs the proactor policy for the duration. Regression test: `tests/test_export.py` |
 | 17 | A model answers with the notes block only | **resolved** | The server falls back to the model's own `next_step`, then to a language-appropriate continuation, so the learner never sees an empty bubble. Test: `tests/test_api.py` |
+| 18 | **The app was unusable from a phone** — `crypto.randomUUID()` is secure-context only, so it threw on `http://<lan-ip>:8000`: the input cleared, no request was sent, and nothing appeared | **resolved** | Message ids come from a counter (`frontend/src/lib/id.ts`), `send()` can no longer fail silently, errors are shown in the session view, and a vanished session returns the learner to the start screen with an explanation. Test: `frontend/src/lib/id.test.ts` |
 
 ---
 

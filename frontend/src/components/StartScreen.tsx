@@ -14,6 +14,7 @@ interface Props {
   settings: Settings;
   busy: boolean;
   error: string | null;
+  notice: string | null;
   activeSession: ActiveSession | null;
   onStart: (input: {
     prompt: string;
@@ -29,6 +30,7 @@ export default function StartScreen({
   settings,
   busy,
   error,
+  notice,
   activeSession,
   onStart,
   onResume,
@@ -42,7 +44,7 @@ export default function StartScreen({
   const canStart = !busy && (prompt.trim().length > 0 || mode === "voice");
 
   return (
-    <main className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center px-6 py-16">
+    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col justify-center px-5 py-10 sm:px-6 sm:py-16">
       <header className="mb-10 text-center">
         <p className="mb-3 text-[13px] font-medium tracking-[0.18em] text-[var(--color-muted)] uppercase">
           Marasa
@@ -167,6 +169,12 @@ export default function StartScreen({
           </button>
         </div>
       </div>
+
+      {notice ? (
+        <p className="mb-4 rounded-[14px] bg-[var(--color-accent-soft)] px-4 py-3 text-[14px]">
+          {notice}
+        </p>
+      ) : null}
 
       {error ? (
         <p className="mt-4 rounded-[14px] bg-[var(--color-accent-soft)] px-4 py-3 text-[14px] text-[var(--color-ink)]">

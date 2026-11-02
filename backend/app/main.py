@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 
 from .api import router
 from .config import get_settings
@@ -31,16 +30,31 @@ def create_app() -> FastAPI:
     app.include_router(router)
 
     dist = settings.frontend_dist
-    assets = dist / "assets"
-    if assets.is_dir():
-        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+    assets_dir = dist / "assets"
+    if assets_dir.is_dir():
+
+        @app.get("/assets/{path:path}", include_in_schema=False)
+        async def bundled_asset(path: str) -> FileResponse:
+            candidate = (assets_dir / path).resolve()
+            if not candidate.is_file() or assets_dir.resolve() not in candidate.parents:
+                raise HTTPException(status_code=404, detail="Not found")
+            # File names are content-hashed, so they can be cached forever.
+            return FileResponse(
+                candidate,
+                headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            )
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa(full_path: str) -> FileResponse:
             candidate = dist / full_path
             if full_path and candidate.is_file():
                 return FileResponse(candidate)
-            return FileResponse(dist / "index.html")
+            # The shell must always be revalidated, or a phone keeps running
+            # an old bundle after an update (the asset file names are hashed).
+            return FileResponse(
+                dist / "index.html",
+                headers={"Cache-Control": "no-cache, must-revalidate"},
+            )
 
     return app
 
