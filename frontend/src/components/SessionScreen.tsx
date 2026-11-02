@@ -12,6 +12,15 @@ import {
   type Settings,
 } from "../lib/api";
 import { createRecognizer, isSpeechSupported, type RecognitionLike } from "../lib/speech";
+import { mergeMessages } from "../lib/merge";
+
+/** BCP-47 tags so a phone switches to the right keyboard (Arabic, Swedish, …). */
+const KEYBOARD_LANG: Record<string, string> = {
+  es: "es",
+  sv: "sv",
+  "ar-lev": "ar",
+  auto: "en",
+};
 
 interface Props {
   session: Session;
@@ -39,6 +48,8 @@ export default function SessionScreen({ session, settings, onExit, onNewSession,
     settings.languages.find((language) => language.id === session.language)?.stt_locale ??
     "en-US";
   const voiceSupported = isSpeechSupported();
+  const keyboardLang = KEYBOARD_LANG[session.language] ?? "en";
+  const textDirection = session.language === "ar-lev" ? "rtl" : "ltr";
 
   useEffect(() => {
     getSession(session.session_id)
@@ -58,6 +69,21 @@ export default function SessionScreen({ session, settings, onExit, onNewSession,
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, streaming]);
+
+  // One session is shared by every device on the network, so poll the backend
+  // for messages sent from another device (e.g. the phone) and merge them in.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (streaming) return;
+      getSession(session.session_id)
+        .then((payload) => {
+          setMessages((current) => mergeMessages(current, payload.messages));
+          setObservations(payload.observations);
+        })
+        .catch(() => undefined);
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [session.session_id, streaming]);
 
   const send = async (text: string) => {
     const trimmed = text.trim();
@@ -301,6 +327,8 @@ export default function SessionScreen({ session, settings, onExit, onNewSession,
               }
             }}
             rows={1}
+            lang={keyboardLang}
+            dir={textDirection}
             placeholder={listening ? "Listening…" : "Write in the language you are learning…"}
             className="max-h-40 min-h-11 flex-1 resize-none rounded-[22px] border border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-3 text-[16px] outline-none focus:border-[var(--color-accent)]"
           />

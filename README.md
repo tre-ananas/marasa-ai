@@ -76,6 +76,38 @@ The script picks the **first free port** for each service (8000 → 8001 → …
 
 For a single-process deployment, build the frontend (`npm run build` in `frontend/`) and start only the backend — FastAPI then serves `frontend/dist` directly.
 
+### Use it from your phone (or another device)
+
+`scripts/serve.ps1` builds the frontend and serves everything — UI and API — from **one port**, bound to every network interface:
+
+```powershell
+.\scripts\serve.ps1
+```
+
+It prints the URL to open on your phone, for example `http://10.0.0.48:8000`. Any device on the same Wi-Fi can open it, and **all devices share one session**: start a conversation on the computer, pick it up on the phone, and the transcript stays in sync (each client polls the shared session every 2.5 seconds). Because a session is shared, the start screen offers **Resume session** when one is already running.
+
+What works over the LAN:
+
+| | |
+| --- | --- |
+| Text conversation | ✅ on every device |
+| Shared session, live transcript | ✅ |
+| Recap PDF | ✅ (downloaded by whichever device ends the session) |
+| Language keyboard | ✅ the composer is tagged with the target language (`ar`, `es`, `sv`), so a phone switches to the right keyboard — including Arabic, right-to-left |
+| **Voice input** | ❌ over plain HTTP — browsers only allow microphone access in a secure context (HTTPS or localhost). Text is the point of using the phone, so this is a reasonable trade; see below if you want voice on the LAN |
+
+Notes:
+
+- **Windows firewall.** The first time, Windows may ask to allow connections through the firewall. If it does not, allow `python.exe` (the backend) on the Private network profile. There are already allow rules for `python.exe` and `node.exe` on this machine.
+- **No authentication.** Anyone on your network can use the app and read the session. That is acceptable on a trusted home Wi-Fi; do not expose the port to the internet. Sessions are ephemeral, so nothing is kept once Marasa stops.
+- **Voice on the LAN** would need HTTPS: you would have to put a reverse proxy with a certificate in front of the app, and a self-signed certificate is awkward to trust on a phone. Not worth it for the MVP.
+
+For development with the same network exposure (Vite dev server instead of the built bundle):
+
+```powershell
+.\scripts\dev.ps1 -Expose
+```
+
 ### Troubleshooting
 
 | Symptom | Cause | Fix |

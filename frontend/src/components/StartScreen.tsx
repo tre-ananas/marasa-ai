@@ -2,6 +2,14 @@ import { useState } from "react";
 
 import type { ActiveSession, Mode, Settings } from "../lib/api";
 
+/** BCP-47 tags so a phone switches to the right keyboard (Arabic, Swedish, …). */
+const KEYBOARD_LANG: Record<string, string> = {
+  es: "es",
+  sv: "sv",
+  "ar-lev": "ar",
+  auto: "en",
+};
+
 interface Props {
   settings: Settings;
   busy: boolean;
@@ -90,6 +98,8 @@ export default function StartScreen({
             }
           }}
           rows={3}
+          lang={KEYBOARD_LANG[language] ?? "en"}
+          dir={language === "ar-lev" ? "rtl" : "ltr"}
           placeholder="A topic you want to talk about, or a question you want to explore…"
           className="w-full resize-none border-0 bg-transparent text-[17px] leading-relaxed outline-none placeholder:text-[var(--color-muted)]"
         />

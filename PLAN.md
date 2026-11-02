@@ -56,6 +56,7 @@ Everything else is out of scope (§13).
 | Language | Levantine colloquial Arabic, Spanish, Swedish | UI language English only. STT locale per language. |
 | Tone | Menu: conversation partner, formal interview, OPI examiner, debate, storytelling | Tone is part of the system prompt and changes elicitation strategy. |
 | Overrides | **None in the MVP** | Marasa's judgements are final; the recap is the record. |
+| Network | **LAN sharing** (`scripts/serve.ps1`) | The app is served on `0.0.0.0` so a phone can use it; one session is shared by all devices and clients poll it every 2.5 s to stay in sync. No auth — trusted-network only. Voice needs HTTPS, so it stays localhost-only |
 | Rubric source | *OPI Familiarization Guide 2020* → `backend/app/tutor/rubric.py` | Paraphrased descriptors with attribution; PDF is gitignored (not redistributable). |
 | Email | **Removed** | — |
 
@@ -142,6 +143,7 @@ Session(id, language_id, tone_id, mode, topics, vocab_terms,
 ```
 
 - Exactly **one active session**. Starting another returns `409`; the UI asks the learner to discard the current one first.
+- **The session is shared by every device on the network.** The store lives in the backend process, and each client polls `GET /api/sessions/{id}` every 2.5 s and merges the server's transcript (the source of truth) with its local list, so a phone and a computer stay in sync. A reply still streaming is kept locally until the server has the final text.
 - The UI can always find the session the backend holds: `GET /api/sessions/active` (and `DELETE /api/sessions/active`) work without knowing the id, so a page reload cannot strand the learner in a conflict loop. The `409` body carries `active_session_id` as well.
 - Closing the session view keeps the session alive so the start screen can offer **Resume** or **Discard**; "Start a new session" discards it.
 - Nothing is written to disk. Closing Marasa erases everything.
@@ -205,8 +207,9 @@ Keep the system prompt + first turn + the **last 20 messages** + a running diges
 - Honest footer: *"Sessions are not saved. Download the recap PDF to keep a record."*
 
 ### 4.2 Session
-- Marasa left / learner right; topic, language, tone and a live level chip in the header; "End session".
-- Voice mode: mic button (Web Speech API), interim transcript, permission/unsupported fallbacks.
+- Marasa left / learner right; topic, language, tone, active model and a live level chip in the header; "End session".
+- Voice mode: mic button (Web Speech API), interim transcript, permission/unsupported fallbacks. Voice is unavailable over plain HTTP on a LAN address (secure-context rule) — the app says so rather than failing silently.
+- The composer carries the target language's `lang` and `dir`, so a phone shows the right keyboard (Arabic right-to-left included).
 - Observations are **not** shown mid-session; they appear in the recap.
 
 ### 4.3 Recap
