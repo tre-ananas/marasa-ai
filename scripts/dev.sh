@@ -5,7 +5,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-backend_port="${BACKEND_PORT:-8000}"
+backend_port="${BACKEND_PORT:-8787}"
 frontend_port="${FRONTEND_PORT:-5173}"
 
 # Pick a free port if the preferred one is taken (a stale server should never
