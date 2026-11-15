@@ -24,6 +24,7 @@ interface Props {
   }) => void;
   onResume: () => void;
   onDiscardActive: () => void;
+  onOpenSettings: () => void;
 }
 
 export default function StartScreen({
@@ -35,20 +36,32 @@ export default function StartScreen({
   onStart,
   onResume,
   onDiscardActive,
+  onOpenSettings,
 }: Props) {
   const [prompt, setPrompt] = useState("");
   const [language, setLanguage] = useState("auto");
   const [tone, setTone] = useState("conversation_partner");
   const [mode, setMode] = useState<Mode>("text");
 
-  const canStart = !busy && (prompt.trim().length > 0 || mode === "voice");
+  const canStart =
+    !busy && settings.authenticated && (prompt.trim().length > 0 || mode === "voice");
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col justify-center px-5 py-10 sm:px-6 sm:py-16">
       <header className="mb-10 text-center">
-        <p className="mb-3 text-[13px] font-medium tracking-[0.18em] text-[var(--color-muted)] uppercase">
-          Marasa
-        </p>
+        <div className="mb-3 flex items-center justify-center gap-3">
+          <p className="text-[13px] font-medium tracking-[0.18em] text-[var(--color-muted)] uppercase">
+            Marasa
+          </p>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="rounded-full border border-[var(--color-line)] px-3 py-1 text-[12px] text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
+            title="Connect your OpenCode account"
+          >
+            {settings.authenticated ? settings.model || "Signed in" : "Sign in with OpenCode"}
+          </button>
+        </div>
         <h1 className="text-[34px] leading-[1.15] font-semibold tracking-[-0.02em] text-balance">
           What would you like to talk about?
         </h1>
@@ -57,6 +70,23 @@ export default function StartScreen({
           shows you what to work on next.
         </p>
       </header>
+
+      {!settings.authenticated ? (
+        <div className="mb-6 rounded-[var(--radius-card)] border border-[var(--color-line)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-soft)]">
+          <h2 className="text-[17px] font-semibold tracking-[-0.01em]">Sign in with OpenCode Go</h2>
+          <p className="mt-1 text-[14px] leading-relaxed text-[var(--color-muted)]">
+            Paste your OpenCode Go API key to start. Marasa keeps it only in memory for this
+            browser session, and every request draws from your Go subscription allowance.
+          </p>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="mt-4 rounded-[var(--radius-control)] bg-[var(--color-accent)] px-5 py-2 text-[15px] font-medium text-white transition hover:brightness-110"
+          >
+            Sign in with OpenCode
+          </button>
+        </div>
+      ) : null}
 
       {activeSession ? (
         <div className="mb-6 rounded-[var(--radius-card)] border border-[var(--color-line)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-soft)]">

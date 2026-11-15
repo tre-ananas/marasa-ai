@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import Response, StreamingResponse
+import httpx
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from .config import get_settings
+from .auth import (
+    SESSION_COOKIE,
+    auth_store,
+    clear_session_cookie,
+    require_owned_learning_session,
+    require_session,
+    set_session_cookie,
+)
+from .config import (
+    DEFAULT_MODEL,
+    clear_stored_settings,
+    get_settings,
+)
 from .providers.base import TurnRequest
+from .providers.opencode_console import ProviderError
 from .providers.registry import ProviderUnavailable, get_provider
 from .session import ActiveSessionExists, Observation, Session, store
 from .tutor.languages import LANGUAGES, continuation_fallback, resolve_language
@@ -67,32 +82,43 @@ def _session_payload(session: Session) -> SessionCreateResponse:
     )
 
 
+class SettingsUpdate(BaseModel):
+    model: str | None = None
+
+
+class ConnectionTest(BaseModel):
+    model: str | None = None
+
+
+class SignInRequest(BaseModel):
+    api_key: str = Field(min_length=8, max_length=512)
+
+
 @router.get("/health")
 async def health() -> dict:
     settings = get_settings()
-    model = settings.model
-    try:
-        provider = get_provider()
-        model = model or getattr(provider, "default_model", model)
-    except ProviderUnavailable:
-        pass
+    model = settings.model or DEFAULT_MODEL
     return {
         "ok": True,
         "app": settings.app_name,
-        "provider": settings.provider,
+        "provider": "console",
         "model": model,
-        "key_configured": settings.key_configured,
-        "active_session": store.active.id if store.active else None,
+        "authenticated": False,
+        "endpoint": "go",
     }
 
 
 @router.get("/settings")
-async def read_settings() -> dict:
+async def read_settings(request: Request) -> dict:
     settings = get_settings()
+    auth_session = auth_store.get(request.cookies.get(SESSION_COOKIE))
     return {
-        "provider": settings.provider,
-        "model": settings.model,
-        "key_configured": settings.key_configured,
+        "provider": "console",
+        "model": auth_session.model if auth_session else "",
+        "authenticated": auth_session is not None,
+        "endpoint": "go",
+        "free_model": DEFAULT_MODEL,
+        "paid_model": DEFAULT_MODEL,
         "pdf_engine": settings.pdf_engine,
         "languages": [
             {"id": lang.id, "label": lang.label, "stt_locale": lang.stt_locale}
@@ -104,21 +130,130 @@ async def read_settings() -> dict:
     }
 
 
-@router.get("/models")
-async def models() -> dict:
-    settings = get_settings()
+@router.post("/auth/opencode/sign-in")
+async def sign_in(payload: SignInRequest, response: Response) -> dict:
+    """Create an ephemeral OpenCode Go session.
+
+    OpenCode's documented third-party Go integration uses a personal API key.
+    The key is retained only in memory and is never persisted or returned.
+    """
+    clear_stored_settings(get_settings().data_dir)
+    api_key = payload.api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Enter your OpenCode Go API key.")
+
+    provider = get_provider("console", api_key=api_key)
     try:
-        provider = get_provider()
-        return {"provider": provider.name, "models": [m.__dict__ for m in await provider.list_models()]}
+        catalogue = await provider.list_models()
+    except ProviderError as error:
+        raise HTTPException(status_code=error.status or 502, detail=str(error)) from error
+    except httpx.TimeoutException as error:
+        raise HTTPException(status_code=504, detail="OpenCode did not respond in time.") from error
+
+    model = DEFAULT_MODEL
+    if not any(item.id == model for item in catalogue):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"'{model}' is not available on your Go plan. Marasa uses only "
+                f"{model}; check that your OpenCode workspace has Go access."
+            ),
+        )
+
+    token, auth_session = auth_store.create(api_key, model=model)
+    set_session_cookie(response, token)
+    return {
+        "authenticated": True,
+        "endpoint": "go",
+        "model": auth_session.model or DEFAULT_MODEL,
+        "expires_at": auth_session.expires_at,
+    }
+
+
+@router.post("/auth/sign-out")
+async def sign_out(request: Request, response: Response) -> dict:
+    token = request.cookies.get(SESSION_COOKIE)
+    auth_store.delete(token)
+    clear_session_cookie(response)
+    return {"authenticated": False}
+
+
+@router.put("/settings")
+async def update_settings(request: Request, payload: SettingsUpdate) -> dict:
+    """Validate the request and return the fixed OpenCode Go settings."""
+    require_session(request)
+    return await read_settings(request)
+
+
+@router.post("/auth/opencode/refresh")
+async def refresh_sign_in(request: Request, response: Response) -> dict:
+    """Rotate the local browser token without changing the Go credential."""
+    token = request.cookies.get(SESSION_COOKIE)
+    auth_session = auth_store.get(token)
+    if auth_session is None:
+        raise HTTPException(status_code=401, detail="Sign in with OpenCode Go to continue.")
+    new_token = auth_store.rotate(token, auth_session.api_key, auth_session.model)
+    if new_token is None:
+        raise HTTPException(status_code=401, detail="Sign in with OpenCode Go to continue.")
+    set_session_cookie(response, new_token)
+    return {"authenticated": True, "model": auth_session.model or DEFAULT_MODEL}
+
+
+@router.post("/settings/test")
+async def test_connection(request: Request, payload: ConnectionTest) -> dict:
+    """Send a tiny completion using the already signed-in Go credential."""
+    auth_session = require_session(request)
+    provider = get_provider("console", api_key=auth_session.api_key)
+    model = DEFAULT_MODEL
+    request_body = TurnRequest(
+        session_id="connection-test",
+        system="Reply with the single word: ready",
+        messages=[{"role": "user", "content": "ready"}],
+        model=model,
+        max_tokens=16,
+    )
+    started = time.perf_counter()
+    chunks: list[str] = []
+    usage = None
+    try:
+        async for chunk in provider.stream(request_body):
+            if chunk.delta:
+                chunks.append(chunk)
+            if chunk.usage:
+                usage = chunk.usage
+    except ProviderError as error:
+        raise HTTPException(status_code=error.status or 502, detail=str(error)) from error
+
+    return {
+        "ok": True,
+        "model": model,
+        "reply": "".join(chunks).strip(),
+        "latency_s": round(time.perf_counter() - started, 2),
+        "cost_usd": usage.cost_usd if usage else None,
+        "billing_source": usage.billing_source if usage else None,
+    }
+
+
+@router.get("/models")
+async def models(request: Request) -> dict:
+    auth_session = require_session(request)
+    try:
+        provider = get_provider("console", api_key=auth_session.api_key)
+        catalogue = await provider.list_models()
+        return {"provider": provider.name, "models": [model.__dict__ for model in catalogue]}
     except ProviderUnavailable as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
+    except ProviderError as error:
+        raise HTTPException(status_code=error.status or 502, detail=str(error)) from error
+    except httpx.TimeoutException as error:
+        raise HTTPException(status_code=504, detail="OpenCode did not respond in time.") from error
 
 
 @router.post("/sessions", response_model=SessionCreateResponse)
-async def create_session(payload: SessionCreate) -> SessionCreateResponse:
-    settings = get_settings()
+async def create_session(request: Request, payload: SessionCreate) -> SessionCreateResponse:
+    auth_session = require_session(request)
     try:
-        provider = get_provider()
+        provider = get_provider("console", api_key=auth_session.api_key)
     except ProviderUnavailable as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
 
@@ -127,7 +262,7 @@ async def create_session(payload: SessionCreate) -> SessionCreateResponse:
     if prompt and not topics:
         topics = [prompt[:200]]
 
-    model = settings.model or getattr(provider, "default_model", "") or settings.model
+    model = DEFAULT_MODEL
 
     try:
         session = store.create(
@@ -151,18 +286,17 @@ async def create_session(payload: SessionCreate) -> SessionCreateResponse:
             },
         ) from error
 
+    auth_store.bind_learning_session(request.cookies.get(SESSION_COOKIE) or "", session.id)
     return _session_payload(session)
 
 
 @router.get("/sessions/active")
-async def read_active_session() -> dict:
-    """The session that is currently running, if any.
-
-    The UI loses its session id when the page is reloaded, so it needs a way to
-    find (and resume, or discard) the session the backend still holds.
-    """
+async def read_active_session(request: Request) -> dict:
+    """The session owned by the signed-in browser, if any."""
+    require_session(request)
+    state = auth_store.get_state(request.cookies.get(SESSION_COOKIE))
     session = store.active
-    if session is None:
+    if session is None or state is None or state.learning_session_id != session.id:
         raise HTTPException(status_code=404, detail="No active session.")
     return {
         "session": _session_payload(session).model_dump(),
@@ -173,12 +307,19 @@ async def read_active_session() -> dict:
 
 
 @router.delete("/sessions/active", response_model=DiscardResponse)
-async def discard_active_session() -> DiscardResponse:
+async def discard_active_session(request: Request) -> DiscardResponse:
+    require_session(request)
+    session = store.active
+    if session is not None:
+        auth_store.unbind_learning_session(
+            request.cookies.get(SESSION_COOKIE) or "", session.id
+        )
     return DiscardResponse(discarded=store.discard())
 
 
 @router.get("/sessions/{session_id}")
-async def read_session(session_id: str) -> dict:
+async def read_session(request: Request, session_id: str) -> dict:
+    require_owned_learning_session(request, session_id)
     session = store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found or already discarded.")
@@ -191,7 +332,8 @@ async def read_session(session_id: str) -> dict:
 
 
 @router.post("/sessions/{session_id}/turns")
-async def create_turn(session_id: str, body: dict) -> StreamingResponse:
+async def create_turn(request: Request, session_id: str, body: dict) -> StreamingResponse:
+    auth_session = require_owned_learning_session(request, session_id)
     session = store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found or already discarded.")
@@ -201,7 +343,7 @@ async def create_turn(session_id: str, body: dict) -> StreamingResponse:
         raise HTTPException(status_code=400, detail="Empty message.")
 
     try:
-        provider = get_provider(session.provider)
+        provider = get_provider("console", api_key=auth_session.api_key)
     except ProviderUnavailable as error:
         raise HTTPException(status_code=501, detail=str(error)) from error
 
@@ -224,33 +366,52 @@ async def create_turn(session_id: str, body: dict) -> StreamingResponse:
     )
 
     async def event_stream() -> AsyncIterator[str]:
-        request = TurnRequest(
-            session_id=session.id,
-            system=system,
-            messages=history,
-            model=session.model,
-        )
-
         raw_parts: list[str] = []
-        try:
-            async for chunk in provider.stream(request):
-                if chunk.delta:
-                    raw_parts.append(chunk.delta)
-                    yield _sse("delta", {"text": chunk.delta})
-                if chunk.usage:
-                    session.usage["input_tokens"] = (
-                        session.usage.get("input_tokens", 0) + chunk.usage.input_tokens
-                    )
-                    session.usage["output_tokens"] = (
-                        session.usage.get("output_tokens", 0) + chunk.usage.output_tokens
-                    )
-                    if chunk.usage.cost_usd is not None:
-                        session.usage["cost_usd"] = round(
-                            session.usage.get("cost_usd", 0.0) + chunk.usage.cost_usd, 6
+        succeeded = True
+
+        async def run_turn(model: str) -> AsyncIterator[str]:
+            """Stream one turn. Sets ``succeeded`` to False if it fails."""
+            nonlocal succeeded
+            request = TurnRequest(
+                session_id=session.id,
+                system=system,
+                messages=history,
+                model=model,
+            )
+            try:
+                async for chunk in provider.stream(request):
+                    if chunk.delta:
+                        raw_parts.append(chunk.delta)
+                        yield _sse("delta", {"text": chunk.delta})
+                    if chunk.usage:
+                        session.usage["input_tokens"] = (
+                            session.usage.get("input_tokens", 0) + chunk.usage.input_tokens
                         )
-                    yield _sse("usage", chunk.usage.__dict__)
-        except Exception as error:  # noqa: BLE001 - surfaced to the client as an event
-            yield _sse("error", {"message": str(error)})
+                        session.usage["output_tokens"] = (
+                            session.usage.get("output_tokens", 0) + chunk.usage.output_tokens
+                        )
+                        if chunk.usage.cost_usd is not None:
+                            session.usage["cost_usd"] = round(
+                                session.usage.get("cost_usd", 0.0) + chunk.usage.cost_usd, 6
+                            )
+                        if chunk.usage.allowance_usd is not None:
+                            session.usage["allowance_usd"] = round(
+                                session.usage.get("allowance_usd", 0.0)
+                                + chunk.usage.allowance_usd,
+                                6,
+                            )
+                        yield _sse("usage", chunk.usage.__dict__)
+            except ProviderError as error:
+                succeeded = False
+                yield _sse("error", {"message": str(error), "status": error.status})
+            except Exception as error:  # noqa: BLE001 - surfaced to the client
+                succeeded = False
+                yield _sse("error", {"message": str(error)})
+
+        async for event in run_turn(session.model):
+            yield event
+
+        if not succeeded:
             return
 
         raw = "".join(raw_parts)
@@ -305,7 +466,8 @@ async def create_turn(session_id: str, body: dict) -> StreamingResponse:
 
 
 @router.post("/sessions/{session_id}/end")
-async def end_session(session_id: str) -> dict:
+async def end_session(request: Request, session_id: str) -> dict:
+    require_owned_learning_session(request, session_id)
     session = store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found or already discarded.")
@@ -317,17 +479,20 @@ async def end_session(session_id: str) -> dict:
 
 
 @router.delete("/sessions/{session_id}", response_model=DiscardResponse)
-async def discard_session(session_id: str) -> DiscardResponse:
+async def discard_session(request: Request, session_id: str) -> DiscardResponse:
+    require_owned_learning_session(request, session_id)
+    auth_store.unbind_learning_session(request.cookies.get(SESSION_COOKIE) or "", session_id)
     return DiscardResponse(discarded=store.discard(session_id))
 
 
 @router.post("/sessions/{session_id}/recap.pdf")
-async def recap_pdf(session_id: str) -> Response:
+async def recap_pdf(request: Request, session_id: str) -> Response:
     """Render the session recap as a PDF.
 
     The PDF is the only durable artefact of a session: transcripts and notes
     live in memory and disappear when Marasa closes.
     """
+    require_owned_learning_session(request, session_id)
     session = store.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found or already discarded.")

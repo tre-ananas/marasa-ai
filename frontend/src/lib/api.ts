@@ -17,10 +17,27 @@ export interface ToneOption {
 export interface Settings {
   provider: string;
   model: string;
-  key_configured: boolean;
+  authenticated: boolean;
+  endpoint: string;
+  free_model: string;
+  paid_model: string;
   pdf_engine: string;
   languages: LanguageOption[];
   tones: ToneOption[];
+}
+
+export interface SignInRequest {
+  api_key: string;
+}
+
+export interface ConnectionTest {
+  ok: boolean;
+  model: string;
+  reply: string;
+  latency_s: number;
+  cost_usd: number | null;
+  allowance_usd: number | null;
+  billing_source: string | null;
 }
 
 export interface Session {
@@ -68,6 +85,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API}${path}`, {
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     ...init,
   });
   if (!response.ok) {
@@ -92,6 +110,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getSettings(): Promise<Settings> {
   return request<Settings>("/settings");
+}
+
+export function signInWithOpenCode(payload: SignInRequest): Promise<{ authenticated: boolean }> {
+  return request("/auth/opencode/sign-in", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function signOut(): Promise<{ authenticated: boolean }> {
+  return request("/auth/sign-out", { method: "POST" });
+}
+
+export function testConnection(): Promise<ConnectionTest> {
+  return request<ConnectionTest>("/settings/test", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export function createSession(payload: {
@@ -153,7 +189,10 @@ export function discardActiveSession(): Promise<{ discarded: boolean }> {
 }
 
 export async function downloadRecapPdf(sessionId: string): Promise<void> {
-  const response = await fetch(`${API}/sessions/${sessionId}/recap.pdf`, { method: "POST" });
+  const response = await fetch(`${API}/sessions/${sessionId}/recap.pdf`, {
+    method: "POST",
+    credentials: "same-origin",
+  });
   if (!response.ok) {
     throw new ApiError(response.status, "Could not render the recap PDF.");
   }
@@ -178,6 +217,7 @@ export interface TurnHandlers {
     next_step: string;
   }) => void;
   onUsage?: (usage: Record<string, unknown>) => void;
+  onNotice?: (payload: { message: string; model: string }) => void;
   onError?: (message: string) => void;
 }
 
@@ -190,6 +230,7 @@ export async function streamTurn(
   const response = await fetch(`${API}/sessions/${sessionId}/turns`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     body: JSON.stringify({ text }),
   });
 
@@ -219,6 +260,8 @@ export async function streamTurn(
         handlers.onNotes?.(payload as never);
       } else if (event.event === "usage") {
         handlers.onUsage?.(payload);
+      } else if (event.event === "notice") {
+        handlers.onNotice?.(payload as never);
       } else if (event.event === "error") {
         handlers.onError?.(String(payload.message ?? "Unknown error"));
       }
