@@ -32,7 +32,7 @@ def _sample_session() -> Session:
         mode="text",
         topics=["Hablemos de comida"],
         level="IM",
-        provider="ollama",
+        provider="console",
         model="qwen3:8b",
     )
     session.add_message("user", "Me encanta la pasta fresca.")

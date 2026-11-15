@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import SettingsSheet from "./components/SettingsSheet";
 import StartScreen from "./components/StartScreen";
 import SessionScreen from "./components/SessionScreen";
 import {
@@ -29,6 +30,7 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     getSettings()
@@ -145,7 +147,28 @@ export default function App() {
           onStart={start}
           onResume={resume}
           onDiscardActive={discardAndStart}
+          onOpenSettings={() => setShowSettings(true)}
         />
+        {showSettings ? (
+          <SettingsSheet
+            settings={settings}
+            onClose={() => setShowSettings(false)}
+            onSaved={(saved) => {
+              setSettings(saved);
+              setShowSettings(false);
+              setNotice(null);
+            }}
+            onSignedOut={() => {
+              setSettings((current) =>
+                current ? { ...current, authenticated: false, model: "" } : current,
+              );
+              setShowSettings(false);
+              setSession(null);
+              setActive(null);
+              setNotice("You signed out. Sign in with OpenCode Go to start a session.");
+            }}
+          />
+        ) : null}
         {conflict ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
             <div className="w-full max-w-sm rounded-[var(--radius-card)] bg-[var(--color-surface)] p-6 shadow-[var(--shadow-lift)]">

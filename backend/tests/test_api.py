@@ -5,13 +5,14 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 
 
-def test_health_reports_provider() -> None:
+def test_health_reports_opencode_go() -> None:
     client = TestClient(create_app())
     response = client.get("/api/health")
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
-    assert payload["provider"] == "mock"
+    assert payload["provider"] == "console"
+    assert payload["endpoint"] == "go"
 
 
 def test_settings_lists_three_languages_and_tones() -> None:
@@ -20,50 +21,58 @@ def test_settings_lists_three_languages_and_tones() -> None:
     language_ids = {language["id"] for language in payload["languages"]}
     assert {"es", "ar-lev", "sv"} <= language_ids
     assert payload["tones"]
+    assert payload["authenticated"] is False
 
 
-def test_second_session_is_rejected_until_discarded() -> None:
+def test_sessions_require_opencode_sign_in() -> None:
     client = TestClient(create_app())
+    response = client.post("/api/sessions", json={"prompt": "Tell me about your week"})
+    assert response.status_code == 401
+
+
+def test_sign_in_keeps_key_out_of_responses_and_settings(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.providers.opencode_console.OpenCodeConsoleProvider.list_models",
+        _async_return_models(),
+    )
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/auth/opencode/sign-in",
+        json={"api_key": "sk-private-test-key"},
+    )
+    assert response.status_code == 200
+    assert response.json()["authenticated"] is True
+    assert "sk-private-test-key" not in response.text
+    assert "HttpOnly" in response.headers["set-cookie"]
+
+    settings = client.get("/api/settings")
+    assert settings.status_code == 200
+    assert settings.json()["authenticated"] is True
+    assert settings.json()["model"] == "minimax-m3"
+    assert "sk-private-test-key" not in settings.text
+
+
+def test_signed_in_session_can_create_and_use_a_learning_session(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.providers.opencode_console.OpenCodeConsoleProvider.list_models",
+        _async_return_models(),
+    )
+    monkeypatch.setattr(
+        "app.providers.opencode_console.OpenCodeConsoleProvider.stream",
+        _async_stream_reply(),
+    )
+    client = TestClient(create_app())
+    client.post(
+        "/api/auth/opencode/sign-in",
+        json={"api_key": "sk-private-test-key"},
+    )
     first = client.post("/api/sessions", json={"prompt": "Tell me about your week"})
     assert first.status_code == 200
     session_id = first.json()["session_id"]
 
-    second = client.post("/api/sessions", json={"prompt": "Another topic"})
-    assert second.status_code == 409
-    # The conflict tells the client which session is in the way, so the UI can
-    # offer to discard it even after a page reload lost the id.
-    detail = second.json()["detail"]
-    assert detail["active_session_id"] == session_id
-
-    assert client.delete(f"/api/sessions/{session_id}").json() == {"discarded": True}
-    third = client.post("/api/sessions", json={"prompt": "Another topic"})
-    assert third.status_code == 200
-
-
-def test_active_session_can_be_found_and_discarded_without_its_id() -> None:
-    """After a page reload the UI loses the session id; it must still recover."""
-    client = TestClient(create_app())
-    assert client.get("/api/sessions/active").status_code == 404
-
-    session_id = client.post("/api/sessions", json={"prompt": "Tell me about your week"}).json()[
-        "session_id"
-    ]
-
     active = client.get("/api/sessions/active")
     assert active.status_code == 200
     assert active.json()["session"]["session_id"] == session_id
-
-    assert client.delete("/api/sessions/active").json() == {"discarded": True}
-    assert client.get("/api/sessions/active").status_code == 404
-    # And a new session can now start.
-    assert client.post("/api/sessions", json={"prompt": "Fresh start"}).status_code == 200
-
-
-def test_turn_streams_reply_and_notes() -> None:
-    client = TestClient(create_app())
-    session_id = client.post("/api/sessions", json={"prompt": "Vamos a hablar"}).json()[
-        "session_id"
-    ]
 
     with client.stream(
         "POST", f"/api/sessions/{session_id}/turns", json={"text": "Me gusta aprender"}
@@ -76,17 +85,42 @@ def test_turn_streams_reply_and_notes() -> None:
     assert "vocab" in body
 
 
+def test_signed_out_client_cannot_read_another_users_session(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.providers.opencode_console.OpenCodeConsoleProvider.list_models",
+        _async_return_models(),
+    )
+    client = TestClient(create_app())
+    client.post(
+        "/api/auth/opencode/sign-in",
+        json={"api_key": "sk-private-test-key"},
+    )
+    session_id = client.post("/api/sessions", json={"prompt": "Private topic"}).json()[
+        "session_id"
+    ]
+
+    other = TestClient(create_app())
+    assert other.get(f"/api/sessions/{session_id}").status_code == 401
+    assert other.get("/api/sessions/active").status_code == 401
+
+
+def test_sign_out_discards_the_ephemeral_credential() -> None:
+    client = TestClient(create_app())
+    client.cookies.set("marasa_session", "not-a-real-session")
+    assert client.get("/api/settings").json()["authenticated"] is False
+
+
 def test_notes_only_answer_never_shows_an_empty_bubble(monkeypatch) -> None:
     """A small model may answer with the machine-readable block only."""
 
     class NotesOnlyProvider:
-        name = "mock"
+        name = "console"
         default_model = "mock-chat"
 
         async def list_models(self) -> list:
             return []
 
-        async def stream(self, request):
+        def stream(self, request):
             from app.providers.base import StreamChunk
 
             yield StreamChunk(
@@ -97,12 +131,26 @@ def test_notes_only_answer_never_shows_an_empty_bubble(monkeypatch) -> None:
                 )
             )
 
-    monkeypatch.setattr("app.api.get_provider", lambda *args, **kwargs: NotesOnlyProvider())
+    monkeypatch.setattr(
+        "app.providers.opencode_console.OpenCodeConsoleProvider.list_models",
+        _async_return_models(),
+    )
+    monkeypatch.setattr(
+        "app.providers.opencode_console.OpenCodeConsoleProvider.stream",
+        _async_stream_notes_only(),
+    )
 
     client = TestClient(create_app())
-    session_id = client.post(
+    sign_in = client.post(
+        "/api/auth/opencode/sign-in",
+        json={"api_key": "sk-private-test-key"},
+    )
+    assert sign_in.status_code == 200
+    created = client.post(
         "/api/sessions", json={"prompt": "Hablemos", "language": "es"}
-    ).json()["session_id"]
+    )
+    assert created.status_code == 200, created.text
+    session_id = created.json()["session_id"]
 
     with client.stream(
         "POST", f"/api/sessions/{session_id}/turns", json={"text": "Me gusta aprender"}
@@ -113,3 +161,43 @@ def test_notes_only_answer_never_shows_an_empty_bubble(monkeypatch) -> None:
     payload = json.loads(notes_line[6:])
     assert payload["reply"].strip(), "the learner must never see an empty message"
     assert "Practice past tense next." in payload["reply"]
+
+
+def _async_stream_notes_only():
+    from app.providers.base import StreamChunk
+
+    async def stream(self, request):
+        yield StreamChunk(
+            delta=(
+                '<marasa_notes>\n{"vocab": [], "grammar": [], '
+                '"level_delta": {"vocab": 0}, "next_step": "Practice past tense next."}'
+                "\n</marasa_notes>"
+            )
+        )
+
+    return stream
+
+
+def _async_stream_reply():
+    from app.providers.base import StreamChunk
+
+    async def stream(self, request):
+        yield StreamChunk(delta="Great! <marasa_notes>{}</marasa_notes>")
+
+    return stream
+
+
+def _async_return_models():
+    from app.providers.base import ModelInfo
+
+    async def list_models(self):
+        return [
+            ModelInfo(
+                id="minimax-m3",
+                label="MiniMax M3",
+                free=False,
+                endpoint="messages",
+            )
+        ]
+
+    return list_models

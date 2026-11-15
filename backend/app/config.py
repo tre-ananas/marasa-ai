@@ -15,6 +15,10 @@ from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+#: The only model Marasa uses. It is included in OpenCode Go and supports the
+#: target languages well.
+DEFAULT_MODEL = "minimax-m3"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -51,6 +55,15 @@ class Settings:
 def _env(name: str, default: str | None = None) -> str | None:
     value = os.getenv(name)
     return value if value not in (None, "") else default
+
+
+def clear_stored_settings(data_dir: Path) -> None:
+    """Remove legacy settings, including any previously persisted API key."""
+    path = data_dir / "settings.json"
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 @lru_cache(maxsize=1)

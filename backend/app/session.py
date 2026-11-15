@@ -6,8 +6,8 @@ erases the session. The learner's only durable artefact is the PDF they
 download (README: "Minimal Viable Product").
 
 Rules:
-- exactly one active session at a time;
-- starting a new session requires discarding the current one;
+- each signed-in browser owns its own active session;
+- sessions are ephemeral and disappear when Marasa closes;
 - a new session is a new agent with no memory of previous discussions.
 """
 
@@ -71,42 +71,38 @@ class Session:
 
 
 class ActiveSessionExists(RuntimeError):
-    """Raised when a second session is started without discarding the first."""
+    """Retained for compatibility with callers that expect this error type."""
 
 
 class SessionStore:
     def __init__(self) -> None:
-        self._active: Session | None = None
+        self._sessions: dict[str, Session] = {}
 
     @property
     def active(self) -> Session | None:
-        return self._active
+        """The most recently created active session."""
+        if not self._sessions:
+            return None
+        return next(reversed(self._sessions.values()))
 
     def create(self, **kwargs) -> Session:
-        if self._active is not None:
-            raise ActiveSessionExists(
-                "A session is already running. Download the recap PDF, then discard it "
-                "before starting a new session."
-            )
         session = Session(id=uuid.uuid4().hex, **kwargs)
-        self._active = session
+        self._sessions[session.id] = session
         return session
 
     def get(self, session_id: str) -> Session | None:
-        if self._active and self._active.id == session_id:
-            return self._active
-        return None
+        return self._sessions.get(session_id)
 
     def discard(self, session_id: str | None = None) -> bool:
-        if self._active is None:
+        if session_id:
+            return self._sessions.pop(session_id, None) is not None
+        if not self._sessions:
             return False
-        if session_id and self._active.id != session_id:
-            return False
-        self._active = None
+        self._sessions.pop(next(reversed(self._sessions)))
         return True
 
     def clear(self) -> None:
-        self._active = None
+        self._sessions.clear()
 
 
 store = SessionStore()
