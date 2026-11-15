@@ -1,12 +1,8 @@
 """Provider interface.
 
 A provider turns a turn request into a stream of text chunks plus usage
-metadata. Four implementations are planned:
-
-- ``mock``    offline, deterministic (default; used by tests)
-- ``console`` OpenCode Console / OpenCode Go inference API (user's own budget)
-- ``local``   a locally running OpenCode V2 server (``opencode serve``)
-- ``ollama``  a local Ollama model
+metadata. Marasa uses OpenCode Go for inference; the mock provider is kept
+for deterministic tests.
 
 Everything above this layer (prompts, note parsing, assessment, PDF export) is
 provider-agnostic.
