@@ -132,6 +132,45 @@ class OpenCodeConsoleProvider:
                 return model.endpoint or "chat-completions"
         return "chat-completions"
 
+    # ------------------------------------------------------------------- usage
+
+    async def get_go_usage(self) -> dict:
+        """Read the signed-in key's Go allowance windows.
+
+        The endpoint is intentionally kept separate from inference: it requires
+        the key's ``Usage: Read`` permission and reports percentages rather
+        than dollar costs.
+        """
+        if not self.api_key:
+            raise ProviderError(
+                "No OpenCode Go API key is configured for this browser session.",
+                status=401,
+            )
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+        }
+        timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(
+                "https://opencode.ai/zen/go/v1/usage",
+                headers=headers,
+            )
+        if response.status_code >= 400:
+            if response.status_code == 403:
+                raise ProviderError(
+                    "This OpenCode key cannot read Go usage. Create a restricted key with "
+                    "Models: Request and Usage: Read.",
+                    status=403,
+                )
+            raise self._error_from_response(response)
+        try:
+            payload = response.json()
+        except (json.JSONDecodeError, ValueError) as error:
+            raise ProviderError("OpenCode returned an invalid Go usage response.") from error
+        return _normalize_go_usage(payload)
+
     # ----------------------------------------------------------------- streaming
 
     async def stream(self, request: TurnRequest) -> AsyncIterator[StreamChunk]:
@@ -283,6 +322,25 @@ class OpenCodeConsoleProvider:
                 retryable=True,
             )
         return ProviderError(f"OpenCode request failed ({status}). {detail}".strip(), status=status)
+
+
+def _normalize_go_usage(payload: dict) -> dict:
+    """Normalize OpenCode's Go usage response into remaining percentages."""
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    windows = {}
+    for name in ("rolling", "weekly", "monthly"):
+        meter = usage.get(name)
+        if not isinstance(meter, dict):
+            continue
+        percent = float(meter.get("percent") or 0)
+        windows[name] = {
+            "used_percent": round(max(0.0, min(100.0, percent)), 1),
+            "remaining_percent": round(max(0.0, min(100.0, 100.0 - percent)), 1),
+            "limited": meter.get("status") == "rate-limited",
+            "resets_at": meter.get("resetsAt"),
+        }
+    return {"windows": windows}
 
 
 def _family_of(entry: dict) -> str:

@@ -29,11 +29,8 @@ export default function SettingsSheet({
     setStatus(null);
     try {
       const result = await testConnection();
-      const allowance = result.allowance_usd
-        ? ` ┬╖ $${result.allowance_usd.toFixed(4)} Go allowance`
-        : "";
       setStatus(
-        `Connected: ${result.model} answered in ${result.latency_s}s${allowance} (${result.billing_source ?? "unknown"} billing).`,
+        `Connected: ${result.model} answered in ${result.latency_s}s through OpenCode Go.`,
       );
     } catch (cause) {
       setStatus(cause instanceof Error ? cause.message : "The connection test failed.");

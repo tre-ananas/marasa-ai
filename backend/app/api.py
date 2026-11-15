@@ -214,13 +214,10 @@ async def test_connection(request: Request, payload: ConnectionTest) -> dict:
     )
     started = time.perf_counter()
     chunks: list[str] = []
-    usage = None
     try:
         async for chunk in provider.stream(request_body):
             if chunk.delta:
                 chunks.append(chunk)
-            if chunk.usage:
-                usage = chunk.usage
     except ProviderError as error:
         raise HTTPException(status_code=error.status or 502, detail=str(error)) from error
 
@@ -229,9 +226,22 @@ async def test_connection(request: Request, payload: ConnectionTest) -> dict:
         "model": model,
         "reply": "".join(chunks).strip(),
         "latency_s": round(time.perf_counter() - started, 2),
-        "cost_usd": usage.cost_usd if usage else None,
-        "billing_source": usage.billing_source if usage else None,
     }
+
+
+@router.get("/usage")
+async def usage(request: Request) -> dict:
+    """Return the signed-in account's Go allowance windows."""
+    auth_session = require_session(request)
+    provider = get_provider("console", api_key=auth_session.api_key)
+    try:
+        return await provider.get_go_usage()
+    except ProviderUnavailable as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+    except ProviderError as error:
+        raise HTTPException(status_code=error.status or 502, detail=str(error)) from error
+    except httpx.TimeoutException as error:
+        raise HTTPException(status_code=504, detail="OpenCode did not respond in time.") from error
 
 
 @router.get("/models")

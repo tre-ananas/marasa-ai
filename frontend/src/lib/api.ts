@@ -30,14 +30,26 @@ export interface SignInRequest {
   api_key: string;
 }
 
+export interface UsageWindow {
+  used_percent: number;
+  remaining_percent: number;
+  limited: boolean;
+  resets_at: string | null;
+}
+
+export interface GoUsage {
+  windows: {
+    rolling?: UsageWindow;
+    weekly?: UsageWindow;
+    monthly?: UsageWindow;
+  };
+}
+
 export interface ConnectionTest {
   ok: boolean;
   model: string;
   reply: string;
   latency_s: number;
-  cost_usd: number | null;
-  allowance_usd: number | null;
-  billing_source: string | null;
 }
 
 export interface Session {
@@ -128,6 +140,10 @@ export function testConnection(): Promise<ConnectionTest> {
     method: "POST",
     body: JSON.stringify({}),
   });
+}
+
+export function getGoUsage(): Promise<GoUsage> {
+  return request<GoUsage>("/usage");
 }
 
 export function createSession(payload: {
