@@ -1,4 +1,4 @@
-"""Offline provider used by default, by tests, and for UI work with no key.
+"""Offline provider used by deterministic tests.
 
 It emits a plausible reply plus a well-formed ``<marasa_notes>`` block so the
 whole pipeline (streaming, note parsing, recap rendering) can be exercised
