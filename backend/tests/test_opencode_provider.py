@@ -95,6 +95,56 @@ async def test_streams_chat_completions_with_cost_and_allowance() -> None:
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_get_go_usage_normalizes_remaining_percentages() -> None:
+    route = respx.get("https://opencode.ai/zen/go/v1/usage").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "usage": {
+                    "rolling": {
+                        "status": "ok",
+                        "percent": 52,
+                        "resetsAt": "2026-11-16T00:20:08.000Z",
+                    },
+                    "weekly": {
+                        "status": "ok",
+                        "percent": 25,
+                        "resetsAt": "2026-11-16T00:00:00.000Z",
+                    },
+                    "monthly": {
+                        "status": "rate-limited",
+                        "percent": 100,
+                        "resetsAt": "2026-11-16T23:31:39.000Z",
+                    },
+                }
+            },
+        )
+    )
+
+    usage = await _provider().get_go_usage()
+
+    assert usage["windows"]["rolling"]["remaining_percent"] == 48
+    assert usage["windows"]["weekly"]["remaining_percent"] == 75
+    assert usage["windows"]["monthly"]["remaining_percent"] == 0
+    assert usage["windows"]["monthly"]["limited"] is True
+    assert route.calls[0].request.headers["Authorization"] == "Bearer sk-test"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_go_usage_requires_usage_read_permission() -> None:
+    respx.get("https://opencode.ai/zen/go/v1/usage").mock(
+        return_value=httpx.Response(403, json={"error": {"message": "forbidden"}})
+    )
+
+    with pytest.raises(ProviderError) as error:
+        await _provider().get_go_usage()
+    assert error.value.status == 403
+    assert "Usage: Read" in str(error.value)
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_streams_anthropic_messages_family() -> None:
     respx.get(MODELS).mock(return_value=httpx.Response(200, json=CATALOGUE))
     route = respx.post(MESSAGES).mock(

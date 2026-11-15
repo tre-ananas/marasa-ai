@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type UIEvent } from "react";
 
 import {
   ApiError,
   downloadRecapPdf,
   endSession,
+  getGoUsage,
   getSession,
   streamTurn,
   type ChatMessage,
+  type GoUsage,
   type Mode,
   type Observation,
   type Session,
@@ -60,8 +62,13 @@ export default function SessionScreen({
   const [interim, setInterim] = useState("");
   const [listening, setListening] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(true);
+  const [sessionModel, setSessionModel] = useState(session.model);
+  const [goUsage, setGoUsage] = useState<GoUsage | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const conversationRef = useRef<HTMLElement>(null);
+  const followOutputRef = useRef(true);
   const recognizerRef = useRef<RecognitionLike | null>(null);
 
   const sttLocale =
@@ -90,11 +97,21 @@ export default function SessionScreen({
         setObservations(payload.observations);
       })
       .catch(() => undefined);
+    getGoUsage()
+      .then(setGoUsage)
+      .catch(() => undefined);
   }, [session.session_id]);
 
   useEffect(() => {
+    if (!followOutputRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, streaming]);
+
+  const handleConversationScroll = (event: UIEvent<HTMLElement>) => {
+    const target = event.currentTarget;
+    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    followOutputRef.current = distanceFromBottom <= 80;
+  };
 
   // The backend owns the active session, so poll it
   // for messages sent from another device (e.g. the phone) and merge them in.
@@ -178,6 +195,11 @@ export default function SessionScreen({
             setLevel(payload.level);
             void getSession(session.session_id).then((full) => setObservations(full.observations));
           },
+          onUsage: () => undefined,
+          onNotice: (payload) => {
+            setNotice(payload.message);
+            setSessionModel(payload.model);
+          },
           onError: (message) => onError(message),
         });
       } catch (cause) {
@@ -255,15 +277,24 @@ export default function SessionScreen({
   const grammar = observations.filter((item) => item.kind === "grammar");
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-5 py-6 sm:py-8">
-      <header className="mb-6 flex flex-wrap items-center gap-3 border-b border-[var(--color-line)] pb-4">
-        <div className="min-w-0">
+    <main className="mx-auto flex h-dvh w-full max-w-3xl flex-col px-5 py-4 sm:py-6">
+      <header className="shrink-0 flex flex-wrap items-center gap-3 border-b border-[var(--color-line)] pb-4">
+        <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-medium">
             {session.topics[0] ?? "Conversation"}
           </p>
-          <p className="text-[13px] text-[var(--color-muted)]">
-            {session.language_label} · {session.tone_label} · {session.model}
-          </p>
+          <button
+            type="button"
+            onClick={() => setDetailsOpen((open) => !open)}
+            aria-expanded={detailsOpen}
+            aria-controls="session-details"
+            className="mt-0.5 flex items-center gap-1.5 text-left text-[13px] text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
+          >
+            <span>{session.language_label} · {session.tone_label} · {sessionModel}</span>
+            <span aria-hidden="true" className="text-[11px]">
+              {detailsOpen ? "▲" : "▼"}
+            </span>
+          </button>
         </div>
         <span className="rounded-[var(--radius-control)] bg-[var(--color-accent-soft)] px-3 py-1 text-[13px] font-medium">
           {level}
@@ -271,13 +302,36 @@ export default function SessionScreen({
         <button
           type="button"
           onClick={ended ? onExit : finish}
-          className="ml-auto rounded-[var(--radius-control)] border border-[var(--color-line)] px-4 py-1.5 text-[14px] font-medium transition hover:bg-[var(--color-canvas)]"
+          className="rounded-[var(--radius-control)] border border-[var(--color-line)] px-4 py-1.5 text-[14px] font-medium transition hover:bg-[var(--color-canvas)]"
         >
           {ended ? "Close" : "End session"}
         </button>
       </header>
 
-      <section className="flex-1 space-y-5 pb-6">
+      {detailsOpen ? (
+        <div
+          id="session-details"
+          className="flex shrink-0 flex-col gap-2 border-b border-[var(--color-line)] py-2 text-[13px] text-[var(--color-muted)]"
+        >
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>Model: {sessionModel}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>OpenCode Go allowance left:</span>
+            <span>{formatUsageWindow(goUsage?.windows.rolling, "5-hour")}</span>
+            <span aria-hidden="true">·</span>
+            <span>{formatUsageWindow(goUsage?.windows.weekly, "weekly")}</span>
+            <span aria-hidden="true">·</span>
+            <span>{formatUsageWindow(goUsage?.windows.monthly, "monthly")}</span>
+          </div>
+        </div>
+      ) : null}
+
+      <section
+        ref={conversationRef}
+        onScroll={handleConversationScroll}
+        className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain py-5"
+      >
         {messages.map((message) => {
           const waiting = streaming && message.role === "assistant" && !message.content;
           return (
@@ -366,7 +420,7 @@ export default function SessionScreen({
             event.preventDefault();
             void send(input);
           }}
-          className="sticky bottom-0 flex items-end gap-3 bg-[var(--color-canvas)] pt-2 pb-4"
+          className="flex shrink-0 items-end gap-3 bg-[var(--color-canvas)] pt-2 pb-4"
         >
           {session.mode === "voice" ? (
             <button
@@ -436,3 +490,17 @@ export default function SessionScreen({
 }
 
 export type { Mode };
+
+function formatPercent(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return "—";
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatUsageWindow(
+  window: { remaining_percent: number; limited: boolean } | undefined,
+  label: string,
+): string {
+  if (!window) return `${label} unavailable`;
+  const status = window.limited ? " limit reached" : "";
+  return `${label} ${formatPercent(window.remaining_percent / 100)} left${status}`;
+}
