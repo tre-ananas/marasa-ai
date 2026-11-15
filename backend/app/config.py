@@ -27,18 +27,15 @@ class Settings:
     port: int = 8000
     data_dir: Path = REPO_ROOT / "data"
 
-    # provider: mock | console | local | ollama
-    provider: str = "mock"
+    # provider is retained for test tooling; application routes always use
+    # OpenCode Go.
+    provider: str = "console"
     # Empty means "use the provider's default model".
     model: str = ""
 
     opencode_api_key: str | None = None
     opencode_base_url: str = "https://opencode.ai/inference"
     opencode_go_base_url: str = "https://opencode.ai/inference/go"
-
-    ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen3:8b"
-    ollama_num_ctx: int = 8192
 
     # chromium | edge
     pdf_engine: str = "edge"
@@ -75,7 +72,7 @@ def get_settings() -> Settings:
         host=_env("MARASA_HOST", "127.0.0.1") or "127.0.0.1",
         port=int(_env("MARASA_PORT", "8000") or "8000"),
         data_dir=data_dir,
-        provider=(_env("MARASA_PROVIDER", "mock") or "mock").lower(),
+        provider=(_env("MARASA_PROVIDER", "console") or "console").lower(),
         model=_env("MARASA_MODEL", "") or "",
         opencode_api_key=_env("MARASA_OPENCODE_API_KEY"),
         opencode_base_url=_env(
@@ -86,9 +83,5 @@ def get_settings() -> Settings:
             "MARASA_OPENCODE_GO_BASE_URL", "https://opencode.ai/inference/go"
         )
         or "https://opencode.ai/inference/go",
-        ollama_base_url=_env("OLLAMA_HOST", "http://127.0.0.1:11434")
-        or "http://127.0.0.1:11434",
-        ollama_model=_env("MARASA_OLLAMA_MODEL", "qwen3:8b") or "qwen3:8b",
-        ollama_num_ctx=int(_env("MARASA_OLLAMA_NUM_CTX", "8192") or "8192"),
         pdf_engine=(_env("MARASA_PDF_ENGINE", "edge") or "edge").lower(),
     )
