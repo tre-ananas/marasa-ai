@@ -7,20 +7,18 @@
     both.
 
 .PARAMETER Expose
-    Bind to every network interface (0.0.0.0) so phones and other devices on
-    your LAN can reach the app. The script prints the URL to open on the
-    phone. Voice input does not work over plain HTTP on a LAN address —
-    browsers require a secure context for microphone access.
+    Deprecated. Marasa is device-local; use the default loopback binding.
 
 .PARAMETER BackendPort
     Preferred backend port (the first free port at or above it is used).
+    8787 by default, to stay out of the way of other apps on 8000.
 
 .PARAMETER FrontendPort
     Preferred frontend port (the first free port at or above it is used).
 #>
 [CmdletBinding()]
 param(
-    [int]$BackendPort = 8000,
+    [int]$BackendPort = 8787,
     [int]$FrontendPort = 5173,
     [switch]$Expose
 )
@@ -88,8 +86,7 @@ $env:MARASA_FRONTEND_PORT = "$frontendPort"
 
 $bindHost = "127.0.0.1"
 if ($Expose) {
-    $bindHost = "0.0.0.0"
-    $env:MARASA_VITE_HOST = "0.0.0.0"
+    Write-Host "-Expose is no longer supported; Marasa remains device-local." -ForegroundColor Yellow
 }
 
 $logDir = Join-Path $root "data\logs"
@@ -133,20 +130,7 @@ try {
         Write-Host "`nMarasa is running." -ForegroundColor Green
         Write-Host "  App:     http://127.0.0.1:$frontendPort"
         Write-Host "  Backend: http://127.0.0.1:$backendPort/api/health"
-        Write-Host "  Provider: $($health.provider) / $($health.model)  (key configured: $($health.key_configured))"
-        if ($Expose) {
-            $addresses = Get-LanAddresses
-            if ($addresses.Count -eq 0) {
-                Write-Host "  On your network: (no LAN address found — is Wi-Fi/Ethernet connected?)" -ForegroundColor Yellow
-            } else {
-                Write-Host "  On your network (open this on your phone):" -ForegroundColor Green
-                foreach ($address in $addresses) {
-                    Write-Host "      http://$address`:$frontendPort"
-                }
-                Write-Host "  Note: the first time, Windows may ask to allow connections through the firewall."
-                Write-Host "  Voice input needs HTTPS and will not work over plain HTTP; typing works."
-            }
-        }
+        Write-Host "  Provider: OpenCode Go (sign-in required per browser session)"
     } else {
         Write-Host "The backend did not come up in time. Check $backendLogErr" -ForegroundColor Yellow
     }

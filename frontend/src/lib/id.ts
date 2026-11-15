@@ -2,8 +2,7 @@
  * Message ids for the transcript.
  *
  * `crypto.randomUUID()` is only available in secure contexts (HTTPS or
- * localhost), so it throws on a plain-HTTP LAN address such as
- * http://192.168.1.10:8000 — exactly how the app is reached from a phone.
+ * localhost), so it throws in insecure browser contexts.
  * These ids only have to be unique within one browser tab, so a counter is
  * enough.
  */

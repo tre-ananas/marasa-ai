@@ -3,13 +3,12 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 // The dev script picks a free port and passes it through, so a stale server
-// on 8000 never breaks `npm run dev`.
-const backendPort = process.env.MARASA_BACKEND_PORT ?? "8000";
+// never breaks `npm run dev`. 8787 keeps Marasa off port 8000.
+const backendPort = process.env.MARASA_BACKEND_PORT ?? "8787";
 
-// 127.0.0.1 by default; `scripts/dev.ps1 -Expose` sets 0.0.0.0 so phones and
-// other devices on the LAN can reach the dev server.
+// Marasa is device-local. The Vite dev server therefore binds only to
+// loopback and does not accept arbitrary LAN Host headers.
 const host = process.env.MARASA_VITE_HOST ?? "127.0.0.1";
-const lanMode = host === "0.0.0.0";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -17,9 +16,8 @@ export default defineConfig({
     host,
     port: Number(process.env.MARASA_FRONTEND_PORT ?? 5173),
     strictPort: false,
-    // Vite blocks requests for unknown Host headers (DNS-rebinding protection).
-    // On a trusted home network we accept them so a phone can load the app.
-    allowedHosts: lanMode ? true : undefined,
+    // Keep Vite's DNS-rebinding protection enabled.
+    allowedHosts: undefined,
     proxy: {
       "/api": {
         target: `http://127.0.0.1:${backendPort}`,

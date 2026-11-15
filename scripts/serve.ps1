@@ -1,25 +1,23 @@
 <#
 .SYNOPSIS
-    Serves Marasa AI to your local network (one port, one process).
+    Serves Marasa AI locally on this device (one port, one process).
 
 .DESCRIPTION
-    Builds the frontend and serves it, together with the API, from FastAPI on
-    0.0.0.0:8000. Any device on the same Wi-Fi can open the app from a phone
-    or tablet; the session is shared, so you can start on the computer and
-    continue on the phone.
-
-    Voice input needs a secure context (HTTPS) and will not work over plain
-    HTTP on a LAN address — typing works, which is the point of using a phone.
+    Builds the frontend and serves it together with the API from FastAPI on
+    127.0.0.1. The app is intentionally not exposed to the LAN or the
+    internet. OpenCode Go credentials live only in memory for the signed-in
+    browser session.
 
 .PARAMETER Port
-    Port to serve on (default 8000).
+    Port to serve on (default 8787, so Marasa never takes port 8000 from
+    another app).
 
 .EXAMPLE
     .\scripts\serve.ps1
 #>
 [CmdletBinding()]
 param(
-    [int]$Port = 8000
+    [int]$Port = 8787
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,21 +33,20 @@ function Update-SessionPath {
 }
 Update-SessionPath
 
-function Get-LanAddresses {
-    try {
-        return @(
-            Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
-                Where-Object {
-                    $_.IPAddress -notlike "127.*" -and
-                    $_.IPAddress -notlike "169.254.*" -and
-                    $_.PrefixOrigin -ne "WellKnown"
-                } |
-                Sort-Object InterfaceMetric |
-                Select-Object -ExpandProperty IPAddress
-        )
-    } catch {
-        return @()
+function Get-FreePort([int]$Preferred) {
+    for ($candidate = $Preferred; $candidate -lt ($Preferred + 20); $candidate++) {
+        $listener = $null
+        try {
+            $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $candidate)
+            $listener.Start()
+            return $candidate
+        } catch {
+            # port in use, try the next one
+        } finally {
+            if ($listener) { $listener.Stop() }
+        }
     }
+    throw "No free port found near $Preferred."
 }
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -67,9 +64,12 @@ npm run build
 if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Host "Frontend build failed." -ForegroundColor Red; exit 1 }
 Pop-Location
 
-Write-Step "Serving on http://0.0.0.0:$Port"
-Write-Note "One session is shared by every device on the network."
-Write-Note "Access log: $serverLog"
+# Never take a port another app is using: 8787 first, then 8788, 8789, ...
+$Port = Get-FreePort $Port
+
+Write-Step "Serving on http://127.0.0.1:$Port"
+Write-Note "Device-local only; other network devices cannot connect."
+Write-Note "OpenCode Go sign-in is required for each browser session."
 
 $logDir = Join-Path $root "data\logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -77,9 +77,7 @@ $serverLog = Join-Path $logDir "serve.log"
 
 Push-Location (Join-Path $root "backend")
 try {
-    # Write the access log to a file so you can see requests from other
-    # devices (tail it with: Get-Content data\logs\serve.log -Wait)
-    uv run uvicorn app.main:app --host 0.0.0.0 --port $Port *> $serverLog
+    uv run uvicorn app.main:app --host 127.0.0.1 --port $Port *> $serverLog
 } finally {
     Pop-Location
 }

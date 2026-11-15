@@ -96,7 +96,7 @@ export default function SessionScreen({
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, streaming]);
 
-  // One session is shared by every device on the network, so poll the backend
+  // The backend owns the active session, so poll it
   // for messages sent from another device (e.g. the phone) and merge them in.
   useEffect(() => {
     const timer = window.setInterval(() => {

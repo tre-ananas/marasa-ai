@@ -1,7 +1,7 @@
 /**
  * Reconciles the local transcript with the backend's copy.
  *
- * One session is shared by every device on the network, so the server's
+ * The backend owns the active session, so the server's
  * transcript is the source of truth. The local list is kept only so that a
  * half-streamed reply is not overwritten by a poll that arrives mid-turn.
  */
